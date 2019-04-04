@@ -21,6 +21,7 @@ var (
 
 var (
 	priceRegexp             = regexp.MustCompile("row_price_(\\d+.\\d+)_")
+	altPriceRegexp          = regexp.MustCompile("price_insert_ship_[\\w_]+\">\\$(\\d+.\\d+)<")
 	originalListPriceRegexp = regexp.MustCompile("<span class=\"bi_col_value\">\\$(\\d+.\\d+)<")
 	logger                  = log.New(os.Stderr, "", 0)
 )
@@ -151,6 +152,7 @@ func getListPrice(page []byte) (originalPrice float64, err error) {
 // NaN values are returned along with an error
 func getPrices(page []byte) (min float64, average float64, max float64, err error) {
 	matches := priceRegexp.FindAllSubmatch(page, -1)
+	matches = append(matches, altPriceRegexp.FindAllSubmatch(page, -1)...)
 
 	min = math.MaxFloat32
 	max = 0.
