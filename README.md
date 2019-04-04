@@ -1,4 +1,4 @@
-# library-price
+# 📚💰 library-pricer
 
 This is a quick tool that takes a `csv` file for input (via `os.Stdin`) and fetches prices using [isbn.nu](https://isbn.nu) 
 that it then adds as additional columns to a `csv` output (written to `os.Stdout`). 
