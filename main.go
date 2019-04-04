@@ -1,24 +1,22 @@
 package main
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
-	"github.com/pkg/errors"
+	"github.com/chromedp/chromedp"
 	"gopkg.in/alecthomas/kingpin.v2"
-	"io/ioutil"
 	"log"
 	"math"
-	"net/http"
 	"os"
 	"regexp"
 	"strconv"
-	"time"
 )
 
 var (
 	isbnColumn    = kingpin.Flag("isbnColumn", "The column containing the isbn to use when looking up prices (first column starting at 1)").Required().Int()
 	withHeaderRow = kingpin.Flag("withHeaderRow", "Indicates if a header row should be read from the input and written in the output").Default("true").Bool()
-	throttleTime  = kingpin.Flag("throttleTime", "Sleep time between calls to isbn.nu (be easy on them).").Default("15s").Short('t').Duration()
+	throttleTime  = kingpin.Flag("throttleTime", "Sleep time between calls to isbn.nu (be easy on them).").Default("10s").Short('t').Duration()
 )
 
 var (
@@ -39,6 +37,9 @@ func main() {
 
 	w := csv.NewWriter(os.Stdout)
 
+	c, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
 	for i, record := range records {
 		if i == 0 && *withHeaderRow {
 			w.Write(outputHeaderFor(record))
@@ -53,17 +54,17 @@ func main() {
 
 			if len(isbn) > 0 {
 				priceURL = fmt.Sprintf("https://isbn.nu/%s", isbn)
-				page, err := downloadPricePage(fmt.Sprintf("https://isbn.nu/%s", isbn))
+				page, err := isbnLookup(c, priceURL)
 				if err != nil {
 					logger.Fatalf("Error loading url [%s] to get prices: %s", priceURL, err.Error())
 				}
 
-				min, avg, max, err = getPrices(page)
+				min, avg, max, err = getPrices([]byte(page))
 				if err != nil {
 					logger.Printf("Error getting prices for isbn [%s] from url [%s]: %s, page content:\n%s\n\n", isbn, priceURL, err.Error(), page)
 				}
 
-				listPrice, err = getListPrice(page)
+				listPrice, err = getListPrice([]byte(page))
 				if err != nil {
 					logger.Printf("Error getting original list price for isbn [%s] from url [%s]: %s, page content:\n%s\n", isbn, priceURL, err.Error(), page)
 				}
@@ -71,8 +72,6 @@ func main() {
 
 			w.Write(outputDataRowFor(record, priceURL, min, avg, max, listPrice))
 			w.Flush()
-
-			time.Sleep(*throttleTime)
 		}
 	}
 
@@ -126,16 +125,6 @@ func outputDataRowFor(inRecord []string, url string, min float64, average float6
 	return outRecord
 }
 
-// downloadPricePage fetches the html for the priceURL and returns the full page
-func downloadPricePage(priceURL string) (content []byte, err error) {
-	resp, err := http.Get(priceURL)
-	if err != nil {
-		return nil, errors.Wrapf(err, "Error loading url [%s]", priceURL)
-	}
-
-	return ioutil.ReadAll(resp.Body)
-}
-
 // getListPrice tries to find the original list price in the page. Since it's not
 // always available, an error is returned when no match is found along with NaN
 func getListPrice(page []byte) (originalPrice float64, err error) {
@@ -185,4 +174,17 @@ func getPrices(page []byte) (min float64, average float64, max float64, err erro
 	}
 
 	return math.NaN(), math.NaN(), math.NaN(), fmt.Errorf("Couldn't find any prices in page")
+}
+
+// isbnLookup gets the content at the url using chromedp and waits for the content
+// to be loaded to return the page content
+func isbnLookup(ctx context.Context, url string) (page string, err error) {
+	var html string
+	err = chromedp.Run(ctx, chromedp.Tasks{
+		chromedp.Navigate(url),
+		chromedp.Sleep(*throttleTime),
+		chromedp.InnerHTML("//body", &html),
+	})
+
+	return html, err
 }
